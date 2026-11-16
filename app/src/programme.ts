@@ -17,6 +17,23 @@ function slot(day: string, exId: string, sets: number, repLo: number, repHi: num
 }
 
 export const PLAN_VERSION = 'v5-4day'
+export const KOT_KEY = 'kot'
+
+/** Daily knees over toes routine. Sits outside the rotation. Light version = slots marked light. */
+export function kotDay(dayIndex = 5): PlanDay {
+  const k = (exId: string, sets: number, repLo: number, repHi: number, restSec: number, startKg: number | null, light: boolean, note?: string) =>
+    ({ ...slot(KOT_KEY, exId, sets, repLo, repHi, restSec, startKg, note), kneeGated: false, light })
+  return {
+    dayIndex, key: KOT_KEY, title: 'KOT: Knees over toes', short: 'KOT', isLegDay: false, location: 'home', inRotation: false,
+    exercises: [
+      k('backward-walk', 1, 5, 8, 30, 10, true, 'Light cable load, steady steps. The easiest way to load the quads without stressing the joint.'),
+      k('tibialis-raise', 2, 15, 25, 30, null, true),
+      k('seated-db-calf', 2, 15, 20, 30, 12, false, 'One dumbbell on each thigh. Pause at the top, 3 s down.'),
+      k('patrick-step', 2, 10, 20, 30, null, false, 'Keep pain at 3/10 or below. Raise the step only when 2 x 20 is pain free.'),
+      k('couch-stretch', 1, 60, 90, 15, null, true),
+    ],
+  }
+}
 
 export function defaultPlan(): PlanDay[] {
   return [
@@ -67,6 +84,7 @@ export function defaultPlan(): PlanDay[] {
         slot('lower-b', 'deadbug', 2, 10, 10, 45, null),
       ],
     },
+    kotDay(5),
   ]
 }
 

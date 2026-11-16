@@ -1,10 +1,10 @@
 // Upgrade from the v4 app (6-day plan, schema 3) to v5 (4-day rotation, schema 4).
 // Used twice: by the on-phone database upgrade, and when importing an older backup.
 // Pure function: plain arrays in, plain arrays out.
-import { defaultPlan, PLAN_VERSION } from './programme'
+import { defaultPlan, KOT_KEY, kotDay, PLAN_VERSION } from './programme'
 import type { CompletedSession, PlanDay, SetLog, Setting } from './types'
 
-export const SCHEMA = 4
+export const SCHEMA = 5
 export const MAX_SESSION_MS = 3 * 60 * 60 * 1000 // anything longer was left open by accident
 const GAP_MS = 30 * 60 * 1000
 
@@ -18,12 +18,20 @@ export interface UpgradeInput {
 export interface UpgradeResult {
   plan: PlanDay[]
   planReplaced: boolean
+  kotAdded: boolean
   sessions: CompletedSession[]
   fixed: { id?: number; date: string; dayKey: string; fromMin: number; toMin: number }[]
   settings: Setting[] // settings to put (added or changed)
 }
 
-export const isV5Plan = (plan: PlanDay[]) => plan.some(d => d.key === 'upper-a') && plan.every(d => d.dayIndex <= 4)
+export const isV5Plan = (plan: PlanDay[]) => plan.some(d => d.key === 'upper-a') && plan.filter(d => d.inRotation !== false).every(d => d.dayIndex <= 4)
+
+/** Add the KOT day if the plan has none. Every other day is left exactly as it is. */
+export function ensureKot(plan: PlanDay[]): { plan: PlanDay[]; added: boolean } {
+  if (plan.some(d => d.key === KOT_KEY)) return { plan, added: false }
+  const next = Math.max(0, ...plan.map(d => d.dayIndex)) + 1
+  return { plan: [...plan, kotDay(next)], added: true }
+}
 
 export function sessionMinutes(s: CompletedSession) {
   return Math.round((s.finishedTs - s.startedTs - (s.pausedMs ?? 0)) / 60000)
@@ -60,8 +68,10 @@ export function upgradeData(input: UpgradeInput, now = new Date()): UpgradeResul
     plan = defaultPlan()
     planReplaced = true
   }
+  const kot = ensureKot(plan)
+  plan = kot.plan
   settings.push({ key: 'planVersion', value: PLAN_VERSION })
   const { sessions, fixed } = fixLongSessions(input.sessions, input.setLogs)
   if (fixed.length) settings.push({ key: 'autoClosedFix', value: JSON.stringify(fixed) })
-  return { plan, planReplaced, sessions, fixed, settings }
+  return { plan, planReplaced, kotAdded: kot.added, sessions, fixed, settings }
 }

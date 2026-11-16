@@ -3,7 +3,7 @@ import { db, downloadJSON, exportAll, getEquipment, getPlan, getSetting, importA
 import { BASE_PLATES, DEFAULT_EQUIPMENT, homeBarbellLoads, MICRO_PLATES, type EquipmentProfile } from './equipment'
 import { buildReview } from './review'
 
-export const APP_VERSION = 'v5.0 (Oct 2026)'
+export const APP_VERSION = 'v5.1 (Nov 2026)'
 
 export function Settings() {
   const [lastBackup, setLastBackup] = useState<string | null>(null)
@@ -120,7 +120,7 @@ export function Settings() {
 
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 6 }}>About</div>
-        <p className="small muted" style={{ margin: 0 }}>LiftLog {APP_VERSION} · local-first, offline, free. 4-day rotation, double progression, knee gated, plate aware.</p>
+        <p className="small muted" style={{ margin: 0 }}>LiftLog {APP_VERSION} · local-first, offline, free. 4-day rotation plus daily KOT, double progression, knee gated, plate aware.</p>
       </div>
       {msg && <div className="banner warn">{msg}</div>}
     </div>

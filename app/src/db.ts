@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import { DEFAULT_EQUIPMENT, type EquipmentProfile, loadLadder, type Location } from './equipment'
 import { byId } from './library'
-import { SCHEMA, upgradeData } from './migrate'
+import { ensureKot, SCHEMA, upgradeData } from './migrate'
 import { defaultPlan } from './programme'
 import { kneeGate, suggest, todayStr, type Suggestion } from './progression'
 import type { ActiveSession, Backup, BodyLog, CompletedSession, KneeCheck, PlanDay, PlanExercise, SetLog, Setting } from './types'
@@ -44,6 +44,12 @@ class LiftLogDB extends Dexie {
       for (const s of r.sessions) if (s.autoClosed && s.id !== undefined) await tx.table('sessions').put(s)
       await tx.table('settings').bulkPut(r.settings)
     })
+    // v5.1: add the KOT day outside the rotation. Leaves every existing day and edit untouched.
+    this.version(5).stores(STORES).upgrade(async tx => {
+      const plan = await tx.table('plan').toArray()
+      const r = ensureKot(plan)
+      if (r.added) await tx.table('plan').put(r.plan[r.plan.length - 1])
+    })
   }
 }
 
@@ -84,9 +90,12 @@ export async function persistStorage(): Promise<boolean> {
 export const getPlan = async () => (await db.plan.toArray()).sort((a, b) => a.dayIndex - b.dayIndex)
 export const savePlanDay = (d: PlanDay) => db.plan.put(d)
 export async function resetDay(dayIndex: number) {
-  const d = defaultPlan().find(x => x.dayIndex === dayIndex)
-  if (d) await db.plan.put(d)
-  return d ?? null
+  const current = await db.plan.get(dayIndex)
+  const d = defaultPlan().find(x => (current ? x.key === current.key : x.dayIndex === dayIndex))
+  if (!d) return null
+  const out = { ...d, dayIndex }
+  await db.plan.put(out)
+  return out
 }
 export async function resetWholePlan() {
   await db.transaction('rw', db.plan, async () => { await db.plan.clear(); await db.plan.bulkPut(defaultPlan()) })
@@ -95,7 +104,8 @@ export async function restoreArchivedPlan(): Promise<boolean> {
   const raw = await getSetting('planArchive')
   if (!raw) return false
   const { plan } = JSON.parse(raw) as { plan: PlanDay[] }
-  await db.transaction('rw', db.plan, async () => { await db.plan.clear(); await db.plan.bulkPut(plan) })
+  const withKot = ensureKot(plan).plan
+  await db.transaction('rw', db.plan, async () => { await db.plan.clear(); await db.plan.bulkPut(withKot) })
   return true
 }
 
@@ -131,6 +141,7 @@ export async function finishSession(a: ActiveSession, kneePain: number | null, o
       pausedMs: opts.autoClosed ? 0 : pausedMs, kneePain, ...(opts.autoClosed ? { autoClosed: true } : {}),
     })
     if (a.isLegDay) await db.kneeChecks.add({ sessionDate: a.date, pain: kneePain, swelling: null })
+    else if (a.kot && kneePain !== null) await db.kneeChecks.add({ sessionDate: a.date, pain: kneePain, swelling: null, source: 'kot' })
     await db.active.delete('current')
   })
 }
@@ -158,7 +169,7 @@ export async function exportAll(): Promise<Backup> {
 
 export async function importAll(raw: unknown): Promise<{ planReplaced: boolean; fixed: number }> {
   const b = raw as Backup
-  if (!b || b.app !== 'liftlog' || ![1, 2, 3, 4].includes(b.schema) || !Array.isArray(b.setLogs) || !Array.isArray(b.sessions)) {
+  if (!b || b.app !== 'liftlog' || ![1, 2, 3, 4, 5].includes(b.schema) || !Array.isArray(b.setLogs) || !Array.isArray(b.sessions)) {
     throw new Error('Not a LiftLog backup file')
   }
   let plan = b.plan && b.plan.length ? b.plan : defaultPlan()

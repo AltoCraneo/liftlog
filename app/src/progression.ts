@@ -1,6 +1,6 @@
 // Pure training logic: knee gate, load suggestions, PRs, rotation. No database access here,
 // so every rule can be tested against real history.
-import type { LibraryExercise } from './library'
+import { unitOf, unitSuffix, type LibraryExercise } from './library'
 import type { CompletedSession, KneeCheck, PlanDay, PlanExercise, SetLog } from './types'
 import { ladderMax, snap, stepDown, stepUp } from './equipment'
 
@@ -19,8 +19,21 @@ export function orderedChecks(checks: KneeCheck[]): KneeCheck[] {
     .sort((a, b) => (a.sessionDate === b.sessionDate ? (a.id ?? 0) - (b.id ?? 0) : a.sessionDate < b.sessionDate ? -1 : 1))
 }
 
-export function kneeGate(checks: KneeCheck[]): Gate {
-  const c = orderedChecks(checks)
+const isKot = (c: KneeCheck) => c.source === 'kot'
+
+export function kneeGate(all: KneeCheck[]): Gate {
+  const ordered = orderedChecks(all)
+  const c = ordered.filter(k => !isKot(k))
+  const lastLeg = c[c.length - 1]
+  // A painful KOT session after the last leg day holds loads too. An easy one never clears a leg-day flag.
+  const kotAfter = ordered.filter(k => isKot(k) && (!lastLeg || k.sessionDate >= lastLeg.sessionDate))
+  const kotFlag = kotAfter.some(k => k.pain !== null && k.pain > 3)
+  const g = legGate(c)
+  if (kotFlag && (g === 'clear' || g === 'limit')) return 'hold'
+  return g
+}
+
+function legGate(c: KneeCheck[]): Gate {
   if (c.length === 0) return 'clear'
   const last = c[c.length - 1]
   const prev = c.length > 1 ? c[c.length - 2] : null
@@ -32,14 +45,14 @@ export function kneeGate(checks: KneeCheck[]): Gate {
 
 /** True when the last two leg days were both at or above the limit: time to ask the physio. */
 export function physioFlag(checks: KneeCheck[]): boolean {
-  const c = orderedChecks(checks)
+  const c = orderedChecks(checks).filter(k => !isKot(k))
   if (c.length < 2) return false
   const atOrOver = (k: KneeCheck) => (k.pain !== null && k.pain >= 3) || k.swelling === true
   return atOrOver(c[c.length - 1]) && atOrOver(c[c.length - 2])
 }
 
 export function gateText(g: Gate): string | null {
-  if (g === 'hold') return 'Last leg day was flagged (pain above 3 or swelling). Knee gated lifts repeat their last load.'
+  if (g === 'hold') return 'Knee flagged (pain above 3 or swelling) since your last leg day. Knee gated lifts repeat their last load.'
   if (g === 'deload') return 'Two flagged leg days in a row. Knee gated lifts drop one step.'
   if (g === 'limit') return 'Knee was at 3/10, your limit, last leg day. Knee gated lifts keep their load and chase reps only.'
   return null
@@ -89,7 +102,7 @@ export function suggest(args: {
   const { slot, lib, history, ladder } = args
   const gated = isKneeGated(slot, lib)
   const gate: Gate = gated ? args.gate : 'clear'
-  const unit = lib?.isometric ? 's' : ''
+  const unit = unitSuffix(lib)
   const sessions = groupByDate(history)
   const lastTs = history.length ? Math.max(...history.map(s => s.ts)) : 0
   const max = ladderMax(ladder)
@@ -103,7 +116,8 @@ export function suggest(args: {
   }
   if (sessions.length === 0) {
     const start = slot.startKg === null ? null : snap(ladder, slot.startKg)
-    const how = lib?.isometric ? 'end each hold with a little left in the tank' : 'finish each set with 1 to 2 reps in reserve'
+    const u = unitOf(lib)
+    const how = u === 'sec' ? 'end each hold with a little left in the tank' : u === 'min' ? 'keep it easy and steady' : 'finish each set with 1 to 2 reps in reserve'
     return { weightKg: start, reps: slot.repLo, reason: `First time: calibrate, ${how}.`, tone: 'go' }
   }
 
@@ -137,7 +151,9 @@ export function suggest(args: {
       return { weightKg: w, reps: slot.repHi, reason: 'Range topped out, but the knee was at 3/10 last leg day. Same load until it settles at 2 or below.', tone: 'hold' }
     }
     if (w === null) {
-      return { weightKg: null, reps: top.minReps + 1, reason: `Topped out. Add a rep${unit ? ' second' : ''}, or add load if you can.`, tone: 'go' }
+      const more = ({ reps: 'a rep', sec: '5 seconds', min: 'a minute' })[unitOf(lib)]
+      const step = ({ reps: 1, sec: 5, min: 1 })[unitOf(lib)]
+      return { weightKg: null, reps: top.minReps + step, reason: `Topped out. Add ${more}, or make it a little harder.`, tone: 'go' }
     }
     const up = stepUp(ladder, w, slot.incrementKg)
     if (up === null) {
@@ -176,7 +192,10 @@ export function lastDone(plan: PlanDay[], sessions: CompletedSession[]): Map<str
 }
 
 /** The plan day done least recently. Never-done days come first, ties go by plan order. */
-export function nextUp(plan: PlanDay[], sessions: CompletedSession[]): PlanDay | null {
+export const inRotation = (d: PlanDay) => d.inRotation !== false
+
+export function nextUp(all: PlanDay[], sessions: CompletedSession[]): PlanDay | null {
+  const plan = all.filter(inRotation)
   if (plan.length === 0) return null
   const last = lastDone(plan, sessions)
   const sorted = [...plan].sort((a, b) => {
@@ -210,4 +229,14 @@ export function isoWeekKey(d: Date): string {
 
 export function todayStr(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// ---------- KOT ----------
+/** Light KOT the day of or after a leg session, or whenever the knee is flagged. */
+export function kotLight(args: { today: string; sessions: CompletedSession[]; plan: PlanDay[]; gate: Gate }): { light: boolean; why: string | null } {
+  const legKeys = new Set(args.plan.filter(d => d.isLegDay).map(d => d.key))
+  const recentLeg = args.sessions.some(s => legKeys.has(s.dayKey) && daysBetween(s.date, args.today) <= 1 && daysBetween(s.date, args.today) >= 0)
+  if (args.gate === 'hold' || args.gate === 'deload') return { light: true, why: 'Knee flagged, so today is the light version.' }
+  if (recentLeg) return { light: true, why: 'Leg session in the last day, so today is the light version.' }
+  return { light: false, why: null }
 }

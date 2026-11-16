@@ -546,3 +546,7 @@ input[type=file] {
     display: flex;
     flex-direction: column
 }
+
+.kotcard {
+    border-color: color-mix(in srgb, var(--good) 45%, var(--line))
+}

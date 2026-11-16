@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { db, todayStr } from './db'
 import { exName } from './library'
+import { KOT_KEY } from './programme'
 import { e1rm, isoWeekKey } from './progression'
 import { Bars, LineChart, Stepper } from './components'
 import type { BodyLog, CompletedSession, KneeCheck, SetLog } from './types'
@@ -47,7 +48,10 @@ export function Stats() {
 
   const weeks = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const s of sessions) { const k = isoWeekKey(new Date(s.date + 'T12:00:00')); counts.set(k, (counts.get(k) ?? 0) + 1) }
+    for (const s of sessions) {
+      if (s.dayKey === KOT_KEY) continue
+      const k = isoWeekKey(new Date(s.date + 'T12:00:00')); counts.set(k, (counts.get(k) ?? 0) + 1)
+    }
     const out: { label: string; y: number }[] = []
     for (let i = 7; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i * 7)
@@ -56,10 +60,26 @@ export function Stats() {
     return out
   }, [sessions])
 
+  const kotWeeks = useMemo(() => {
+    const days = new Map<string, Set<string>>()
+    for (const s of sessions) {
+      if (s.dayKey !== KOT_KEY) continue
+      const k = isoWeekKey(new Date(s.date + 'T12:00:00'))
+      if (!days.has(k)) days.set(k, new Set())
+      days.get(k)!.add(s.date)
+    }
+    const out: { label: string; y: number }[] = []
+    for (let i = 7; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i * 7)
+      out.push({ label: i === 0 ? 'now' : `-${i}w`, y: days.get(isoWeekKey(d))?.size ?? 0 })
+    }
+    return out
+  }, [sessions])
+
   // Knee pain on each leg day, next to the heaviest box squat that day.
   const knee = useMemo(() => {
     const byDate = new Map<string, KneeCheck>()
-    for (const c of [...checks].sort((a, b) => (a.id ?? 0) - (b.id ?? 0))) byDate.set(c.sessionDate, c)
+    for (const c of [...checks].filter(c => c.source !== 'kot').sort((a, b) => (a.id ?? 0) - (b.id ?? 0))) byDate.set(c.sessionDate, c)
     const dates = [...byDate.keys()].sort().slice(-10)
     const squat = (d: string) => {
       const ss = sets.filter(s => s.exerciseId === 'box-squat' && s.date === d)
@@ -134,7 +154,13 @@ export function Stats() {
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 8 }}>Sessions per week</div>
         <Bars data={weeks} highlight={WEEKLY_TARGET} />
-        <p className="muted small" style={{ margin: 0 }}>Gold weeks hit {WEEKLY_TARGET}, one full rotation. Three is still a solid week.</p>
+        <p className="muted small" style={{ margin: 0 }}>Gold weeks hit {WEEKLY_TARGET}, one full rotation. Three is still a solid week. KOT isn't counted here.</p>
+      </div>
+
+      <div className="card">
+        <div className="eyebrow" style={{ marginBottom: 8 }}>KOT days per week</div>
+        <Bars data={kotWeeks} highlight={5} max={7} />
+        <p className="muted small" style={{ margin: 0 }}>Gold weeks hit 5 or more days. Light days count.</p>
       </div>
     </div>
   )

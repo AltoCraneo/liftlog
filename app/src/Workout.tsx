@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { autoCloseIfStale, db, finishSession, getEquipment, suggestionFor } from './db'
 import { DEFAULT_EQUIPMENT, loadLadder, platesPerSide, platesText, snap, stepDown, stepUp, type EquipmentProfile } from './equipment'
-import { byId } from './library'
+import { byId, unitStep, unitSuffix, unitWord } from './library'
 import { isKneeGated, isPR, type Suggestion } from './progression'
 import { range, Stepper } from './components'
 import type { ActiveSession, LoggedSet } from './types'
@@ -199,7 +199,7 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
                 <div className="exrow">
                   <div>
                     <div style={{ fontWeight: 600 }}>{l?.name ?? ex.exId}</div>
-                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{l?.isometric ? 's' : ''} · rest {ex.restSec}s</div>
+                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{unitSuffix(l)} · rest {ex.restSec}s</div>
                   </div>
                   <div className="small" style={{ color: n >= ex.sets ? 'var(--good)' : i === session.exerciseIndex ? 'var(--accent)' : 'var(--muted)' }}>{tag}</div>
                 </div>
@@ -213,8 +213,9 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
     )
   }
 
+  const asksKnee = session.isLegDay || !!session.kot
   if (done || view !== 'none') {
-    if (session.isLegDay && view === 'knee') {
+    if (asksKnee && view === 'knee') {
       return (
         <div className="screen fullbleed">
           <div className="eyebrow">Knee check</div>
@@ -226,7 +227,9 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
           </div>
           <button className="btn primary big" onClick={() => finish(pain)}>Save and finish</button>
           <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setView('summary')}>Back</button>
-          <p className="muted small">At 3, knee gated lifts keep their load next time. Above 3, or swelling tomorrow morning, they repeat last session. Twice in a row, they drop a step.</p>
+          <p className="muted small">{session.kot
+            ? 'Above 3 after KOT holds your knee gated lifts and makes tomorrow\'s KOT the light version. An easy KOT never cancels a flag from a leg day.'
+            : 'At 3, knee gated lifts keep their load next time. Above 3, or swelling tomorrow morning, they repeat last session. Twice in a row, they drop a step.'}</p>
         </div>
       )
     }
@@ -240,7 +243,7 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
           <div className="exrow" style={{ padding: '8px 0' }}><span className="muted">Sets logged</span><span className="num">{session.logged.length}</span></div>
           <div className="exrow" style={{ padding: '8px 0' }}><span className="muted">PRs</span><span className="num">{prs}</span></div>
         </div>
-        <button className="btn primary big" onClick={() => (session.isLegDay ? setView('knee') : finish(null))}>{session.isLegDay ? 'Knee check and finish' : 'Finish'}</button>
+        <button className="btn primary big" onClick={() => (asksKnee ? setView('knee') : finish(null))}>{asksKnee ? 'Knee check and finish' : 'Finish'}</button>
         <div style={{ height: 8 }} />
         <button className="btn ghost" onClick={() => { setView('none'); setOverview(true) }}>Keep training: add sets</button>
       </div>
@@ -295,7 +298,7 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
       </div>
       <h1 className="title">{lib?.name ?? slot.exId}</h1>
       <p className="muted small" style={{ marginTop: 0 }}>
-        {extra ? 'Extra set' : `Set ${Math.min(count + 1, slot.sets)} of ${slot.sets}`}{lib?.perSide ? ' · each side' : ''} · target {range(slot.repLo, slot.repHi)}{lib?.isometric ? ' sec' : ' reps · RIR 1 to 2'}
+        {extra ? 'Extra set' : `Set ${Math.min(count + 1, slot.sets)} of ${slot.sets}`}{lib?.perSide ? ' · each side' : ''} · target {range(slot.repLo, slot.repHi)} {unitWord(lib) === 'reps' ? 'reps · RIR 1 to 2' : unitWord(lib)}
       </p>
       {sug && !extra && <div className={`banner ${sug.tone === 'alert' ? 'alert' : 'warn'}`} style={{ fontSize: 13 }}>{sug.reason}</div>}
       {weight !== null && (
@@ -308,7 +311,7 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
           {plates ? `Per side: ${platesText(plates)}` : `Can't build ${weight} kg with your plates. Use + or − to pick a load you can.`}
         </p>
       )}
-      <Stepper value={reps} unit={lib?.isometric ? 'seconds' : 'reps'} onMinus={() => setReps(r => Math.max(0, r - 1))} onPlus={() => setReps(r => r + 1)} />
+      <Stepper value={reps} unit={unitWord(lib)} onMinus={() => setReps(r => Math.max(0, r - unitStep(lib)))} onPlus={() => setReps(r => r + unitStep(lib))} />
       {prFlash && <div className="pr-flash" style={{ textAlign: 'center', marginTop: 10 }}>★ New PR</div>}
       <div style={{ marginTop: 14 }}><button className="btn primary big" onClick={() => logSet(false)}>Log set</button></div>
       <div style={{ marginTop: 8 }}><button className="btn ghost" onClick={() => logSet(true)}>Log as warm-up set</button></div>

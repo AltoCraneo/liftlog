@@ -1,5 +1,6 @@
 // Plain-text summary of the last 28 days, sized to paste into a chat with Claude.
 import { exName } from './library'
+import { KOT_KEY } from './programme'
 import { e1rm, groupByDate, topOf, todayStr } from './progression'
 import type { BodyLog, CompletedSession, KneeCheck, PlanDay, SetLog } from './types'
 
@@ -17,7 +18,9 @@ export function buildReview(args: {
   const from = new Date(now); from.setDate(from.getDate() - days)
   const fromStr = todayStr(from), toStr = todayStr(now)
   const inWin = (d: string) => d > fromStr && d <= toStr
-  const sess = args.sessions.filter(s => inWin(s.date)).sort((a, b) => (a.date < b.date ? -1 : 1))
+  const all = args.sessions.filter(s => inWin(s.date)).sort((a, b) => (a.date < b.date ? -1 : 1))
+  const sess = all.filter(s => s.dayKey !== KOT_KEY)
+  const kotDays = new Set(all.filter(s => s.dayKey === KOT_KEY).map(s => s.date)).size
   const lines: string[] = []
 
   lines.push(`LiftLog review: ${fromStr} to ${toStr} (${days} days)`)
@@ -27,11 +30,12 @@ export function buildReview(args: {
   const names = new Map(args.plan.map(d => [d.key, d.short]))
   const byDay = new Map<string, number>()
   for (const s of sess) byDay.set(s.dayKey, (byDay.get(s.dayKey) ?? 0) + 1)
-  const dayParts = args.plan.map(d => `${d.short} ${byDay.get(d.key) ?? 0}`)
+  const dayParts = args.plan.filter(d => d.key !== KOT_KEY).map(d => `${d.short} ${byDay.get(d.key) ?? 0}`)
   for (const [k, n] of byDay) if (!names.has(k)) dayParts.push(`${k} (old plan) ${n}`)
   lines.push(`By plan day: ${dayParts.join(', ')}`)
   const mins = sess.filter(s => !s.autoClosed).map(s => Math.round((s.finishedTs - s.startedTs - (s.pausedMs ?? 0)) / 60000))
   if (mins.length) lines.push(`Typical length: ${median(mins)} min`)
+  if (args.plan.some(d => d.key === KOT_KEY)) lines.push(`KOT (daily knee routine): ${kotDays} of ${days} days`)
   const auto = sess.filter(s => s.autoClosed).length
   if (auto) lines.push(`Auto-closed (left open): ${auto}`)
 
@@ -59,7 +63,8 @@ export function buildReview(args: {
   if (knees.length === 0) lines.push('- no leg days logged')
   for (const k of knees) {
     const sw = k.swelling === null ? 'swelling not answered' : k.swelling ? 'SWELLING' : 'no swelling'
-    lines.push(`- ${k.sessionDate}: pain ${k.pain ?? 'not recorded'}, ${sw}`)
+    if (k.source === 'kot') lines.push(`- ${k.sessionDate}: KOT, pain ${k.pain ?? 'not recorded'}`)
+    else lines.push(`- ${k.sessionDate}: pain ${k.pain ?? 'not recorded'}, ${sw}`)
   }
 
   lines.push('')
@@ -74,7 +79,7 @@ export function buildReview(args: {
     lines.push('Body weight: none logged.')
   }
   lines.push('')
-  lines.push(`Plan: ${args.plan.map(d => `${d.short} (${d.location ?? 'home'})`).join(', ')}, done in rotation.`)
+  lines.push(`Plan: ${args.plan.filter(d => d.key !== KOT_KEY).map(d => `${d.short} (${d.location ?? 'home'})`).join(', ')}, done in rotation.`)
   return lines.join('\n')
 }
 

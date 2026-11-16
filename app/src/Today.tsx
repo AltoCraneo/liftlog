@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { db, getPlan, getSetting, setSetting, suggestionFor } from './db'
-import { byId } from './library'
-import { WARMUP } from './programme'
-import { daysBetween, gateText, isKneeGated, isoWeekKey, kneeGate, lastDone, nextUp, physioFlag, todayStr, type Gate, type Suggestion } from './progression'
+import { byId, unitSuffix } from './library'
+import { KOT_KEY, WARMUP } from './programme'
+import { daysBetween, gateText, inRotation, isKneeGated, isoWeekKey, kneeGate, kotLight, lastDone, nextUp, physioFlag, todayStr, type Gate, type Suggestion } from './progression'
 import { range, Stepper } from './components'
 import type { ActiveSession, KneeCheck, PlanDay } from './types'
 
@@ -20,6 +20,7 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
   const [autoNote, setAutoNote] = useState<string | null>(null)
   const [sugs, setSugs] = useState<Record<string, Suggestion>>({})
   const [weigh, setWeigh] = useState<{ due: boolean; kg: number }>({ due: false, kg: 88 })
+  const [kot, setKot] = useState<{ doneToday: boolean; week: number; light: boolean; why: string | null }>({ doneToday: false, week: 0, light: false, why: null })
   const today = todayStr()
 
   const load = async () => {
@@ -31,8 +32,17 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
     setLast(lastDone(p, sessions))
     setGate(kneeGate(checks))
     setPhysio(physioFlag(checks))
-    setTrainedToday(sessions.some(s => s.date === today))
-    const sorted = [...checks].sort((a, b) => (a.sessionDate < b.sessionDate ? -1 : a.sessionDate > b.sessionDate ? 1 : (a.id ?? 0) - (b.id ?? 0)))
+    const rotationKeys = new Set(p.filter(inRotation).map(d => d.key))
+    setTrainedToday(sessions.some(s => s.date === today && rotationKeys.has(s.dayKey)))
+    const g = kneeGate(checks)
+    const kotSessions = sessions.filter(s => s.dayKey === KOT_KEY)
+    const wk0 = isoWeekKey(new Date())
+    setKot({
+      doneToday: kotSessions.some(s => s.date === today),
+      week: new Set(kotSessions.filter(s => isoWeekKey(new Date(s.date + 'T12:00:00')) === wk0).map(s => s.date)).size,
+      ...kotLight({ today, sessions, plan: p, gate: g }),
+    })
+    const sorted = checks.filter(c => c.source !== 'kot').sort((a, b) => (a.sessionDate < b.sessionDate ? -1 : a.sessionDate > b.sessionDate ? 1 : (a.id ?? 0) - (b.id ?? 0)))
     const latest = sorted[sorted.length - 1]
     setPainDue(latest && latest.pain === null ? latest : null)
     setSwellingDue(latest && latest.swelling === null && latest.sessionDate < today ? latest : null)
@@ -88,16 +98,19 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
     setWeigh(w => ({ ...w, due: false }))
   }
 
-  const start = async () => {
-    if (!day) return
+  const begin = async (d: PlanDay, opts: { kot?: boolean; light?: boolean } = {}) => {
+    const exercises = opts.light ? d.exercises.filter(e => e.light) : d.exercises
     const s: ActiveSession = {
-      id: 'current', date: today, dayKey: day.key, title: day.title, short: day.short, isLegDay: day.isLegDay,
-      location: day.location ?? 'home', exercises: day.exercises, startedTs: Date.now(), exerciseIndex: 0, setIndex: 0,
-      logged: [], restEndsTs: null,
+      id: 'current', date: today, dayKey: d.key, title: d.title + (opts.light ? ' (light)' : ''), short: d.short + (opts.light ? ' light' : ''),
+      isLegDay: d.isLegDay, location: d.location ?? 'home', exercises, startedTs: Date.now(), exerciseIndex: 0, setIndex: 0,
+      logged: [], restEndsTs: null, ...(opts.kot ? { kot: true, light: !!opts.light } : {}),
     }
     await db.active.put(s)
     onStart(s)
   }
+  const start = async () => { if (day) await begin(day) }
+  const kotPlan = plan.find(d => d.key === KOT_KEY) ?? null
+  const rotation = plan.filter(inRotation)
 
   const ago = (key: string) => {
     const d = last.get(key)
@@ -115,7 +128,7 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
       <h1 className="title">{day ? (day.key === next ? `Next up: ${day.short}` : day.short) : 'LiftLog'}</h1>
 
       <div className="chiprow" style={{ margin: '4px 0 12px' }}>
-        {plan.map(d => (
+        {rotation.map(d => (
           <button key={d.key} className={`chip daychip${selected === d.key ? ' on' : ''}`} onClick={() => setSelected(d.key)}>
             <span>{d.short}{d.key === next ? ' •' : ''}</span>
             <span className="sub">{ago(d.key)}</span>
@@ -158,6 +171,23 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
         <div className="banner warn"><strong>Backup reminder:</strong> {backupMsg} Export from Settings. Clearing Safari data would wipe everything.</div>
       )}
 
+      {kotPlan && (
+        <div className="card kotcard">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+            <div className="eyebrow">KOT daily{kot.light ? ' · light today' : ''}</div>
+            <span className={`chip${kot.doneToday ? ' good' : ''}`}>{kot.doneToday ? 'done today ✓' : `${kot.week} this week`}</span>
+          </div>
+          <div className="small muted" style={{ margin: '6px 0 10px' }}>
+            {(kot.light ? kotPlan.exercises.filter(e => e.light) : kotPlan.exercises).map(e => byId.get(e.exId)?.name.replace(/ \(.*\)/, '') ?? e.exId).join(' · ')}
+          </div>
+          {kot.why && !kot.doneToday && <div className="small" style={{ marginBottom: 10 }}>{kot.why}</div>}
+          <button className={`btn${kot.doneToday ? ' ghost' : ''}`} onClick={() => begin(kotPlan, { kot: true, light: kot.light })}>
+            {kot.doneToday ? `Do KOT again${kot.light ? ' (light)' : ''}` : `Start KOT${kot.light ? ' (light)' : ''}`}
+          </button>
+          {kot.light && <button className="btn ghost" style={{ marginTop: 8, minHeight: 40, fontSize: 14 }} onClick={() => begin(kotPlan, { kot: true })}>Do the full routine anyway</button>}
+        </div>
+      )}
+
       {weigh.due && (
         <div className="card">
           <div className="eyebrow" style={{ marginBottom: 8 }}>Weekly weigh-in</div>
@@ -192,10 +222,10 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
                 <div key={ex.slotId} className="exrow">
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{lib?.name ?? ex.exId}</div>
-                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{lib?.isometric ? 's' : ''}{gated ? ' · knee gated' : ''}</div>
+                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{unitSuffix(lib)}{gated ? ' · knee gated' : ''}</div>
                   </div>
                   <div className="num small" style={{ textAlign: 'right', whiteSpace: 'nowrap', color: s?.tone === 'alert' ? 'var(--bad)' : s?.tone === 'hold' ? 'var(--accent)' : 'var(--ink)' }}>
-                    {s ? `${s.weightKg !== null ? `${s.weightKg} kg × ` : ''}${s.reps}${lib?.isometric ? 's' : ''}` : ''}
+                    {s ? `${s.weightKg !== null ? `${s.weightKg} kg × ` : ''}${s.reps}${unitSuffix(lib)}` : ''}
                   </div>
                 </div>
               )

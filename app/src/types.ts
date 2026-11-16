@@ -14,6 +14,8 @@ export interface PlanExercise {
   /** Per-slot knee gate. Undefined = use the library default. */
   kneeGated?: boolean
   note?: string
+  /** Kept in the light version of an out-of-rotation day (KOT). */
+  light?: boolean
 }
 
 export interface PlanDay {
@@ -23,6 +25,8 @@ export interface PlanDay {
   short: string
   isLegDay: boolean
   location?: Location
+  /** False for days that sit outside the rotation (KOT). Default true. */
+  inRotation?: boolean
   exercises: PlanExercise[]
 }
 
@@ -56,6 +60,8 @@ export interface KneeCheck {
   sessionDate: string
   pain: number | null
   swelling: boolean | null
+  /** 'kot' for a check after the daily KOT routine. Missing = leg day. */
+  source?: 'leg' | 'kot'
 }
 
 export interface BodyLog {
@@ -87,6 +93,9 @@ export interface ActiveSession {
   short: string
   isLegDay: boolean
   location?: Location
+  /** KOT session: asks for knee pain at the end, never counts towards the rotation. */
+  kot?: boolean
+  light?: boolean
   exercises: PlanExercise[]
   startedTs: number
   exerciseIndex: number

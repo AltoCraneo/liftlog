@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getPlan, getSetting, resetDay, resetWholePlan, restoreArchivedPlan, savePlanDay } from './db'
-import { byId, LIBRARY, MUSCLES, type LibraryExercise } from './library'
+import { byId, LIBRARY, MUSCLES, unitOf, unitSuffix, type LibraryExercise } from './library'
 import { isKneeGated } from './progression'
 import { clamp, Field, range } from './components'
 import type { PlanDay, PlanExercise } from './types'
@@ -48,7 +48,8 @@ export function Plan() {
             const old = d.exercises[editing]
             d.exercises[editing] = {
               ...slotFor(e), sets: old.sets,
-              repLo: e.isometric ? e.defaultRepLo : old.repLo, repHi: e.isometric ? e.defaultRepHi : old.repHi, restSec: old.restSec,
+              repLo: unitOf(e) !== unitOf(byId.get(old.exId)) ? e.defaultRepLo : old.repLo,
+              repHi: unitOf(e) !== unitOf(byId.get(old.exId)) ? e.defaultRepHi : old.repHi, restSec: old.restSec,
             }
           } else d.exercises.push(slotFor(e))
           await put(d)
@@ -61,7 +62,7 @@ export function Plan() {
 
   if (slot && editing !== null) {
     const lib = byId.get(slot.exId)
-    const unit = lib?.isometric ? 'sec' : 'reps'
+    const unit = ({ reps: 'reps', sec: 'sec', min: 'min' })[unitOf(lib)]
     const patch = (p: Partial<PlanExercise>) => {
       const d = { ...day, exercises: [...day.exercises] }
       d.exercises[editing] = { ...d.exercises[editing], ...p }
@@ -97,6 +98,11 @@ export function Plan() {
         )}
         <Field label="Minimum jump (kg)" value={slot.incrementKg} step={0.5} onChange={v => patch({ incrementKg: clamp(v, 0.5, 20) })}
           hint="Progression adds at least this, rounded up to the next load your kit allows" />
+        {day.inRotation === false && (
+          <button className={`btn${slot.light ? ' primary' : ''}`} style={{ minHeight: 48, marginBottom: 8 }} onClick={() => patch({ light: !slot.light })}>
+            {slot.light ? 'In the light version: yes' : 'In the light version: no'}
+          </button>
+        )}
         <button className={`btn${gated ? ' primary' : ''}`} style={{ minHeight: 48, marginBottom: 8 }} onClick={() => patch({ kneeGated: !gated })}>
           {gated ? 'Knee gated: on' : 'Knee gated: off'}
         </button>
@@ -113,7 +119,7 @@ export function Plan() {
 
   return (
     <div className="screen">
-      <div className="eyebrow">Plan · 4-day rotation</div>
+      <div className="eyebrow">{day.inRotation === false ? 'Plan · daily, outside the rotation' : 'Plan · 4-day rotation'}</div>
       <h1 className="title" style={{ fontSize: 22 }}>{day.title}</h1>
       <div className="chiprow" style={{ marginBottom: 12 }}>
         {plan.map(d => <button key={d.key} className={`chip${d.key === key ? ' on' : ''}`} onClick={() => { setKey(d.key); setEditing(null) }}>{d.short}</button>)}
@@ -133,7 +139,7 @@ export function Plan() {
               <div className="exrow">
                 <div>
                   <div style={{ fontWeight: 600 }}>{lib?.name ?? e.exId}</div>
-                  <div className="muted small num">{e.sets} × {range(e.repLo, e.repHi)}{lib?.isometric ? 's' : ''} · rest {e.restSec}s{isKneeGated(e, lib) ? ' · knee' : ''}</div>
+                  <div className="muted small num">{e.sets} × {range(e.repLo, e.repHi)}{unitSuffix(lib)} · rest {e.restSec}s{isKneeGated(e, lib) ? ' · knee' : ''}{day.inRotation === false && e.light ? ' · light' : ''}</div>
                 </div>
                 <div className="muted">›</div>
               </div>
@@ -162,7 +168,9 @@ export function Plan() {
           }}>Restore the old 6-day plan</button>
         </>
       )}
-      <p className="muted small">Days run in order, whatever the weekday. The Today screen always offers the day you've gone longest without.</p>
+      <p className="muted small">{day.inRotation === false
+        ? 'KOT never counts towards the rotation. The light version runs the day of or after a leg session, or when the knee is flagged.'
+        : "Days run in order, whatever the weekday. The Today screen always offers the day you've gone longest without."}</p>
     </div>
   )
 }

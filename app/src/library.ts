@@ -22,8 +22,12 @@ export interface LibraryExercise {
   cue: string
   perSide?: boolean
   isometric?: boolean
+  /** What the reps field counts. Default: reps, or seconds for isometric holds. */
+  unit?: Unit
   kneeGoverned?: boolean
 }
+
+export type Unit = 'reps' | 'sec' | 'min'
 
 const X = (
   id: string, name: string, muscle: Muscle, pattern: string, equipment: Equipment,
@@ -190,9 +194,22 @@ export const LIBRARY: LibraryExercise[] = [
   X("leg-extension", "Leg extension (machine)", "quads", "knee extension", "machine", 5, 3, 12, 15, 75, "Slow lower, squeeze at the top. Range your physio has cleared.", { kneeGoverned: true }),
   X("seated-leg-curl", "Seated leg curl (machine)", "hamstrings", "leg curl", "machine", 5, 3, 10, 15, 75, "Hips pinned, curl fully, 2 s lower."),
   X("hip-adduction-machine", "Hip adduction (machine)", "glutes", "abduction", "machine", 5, 2, 12, 15, 60, "Smooth squeeze in, no bouncing at the stretch."),
+  // Knees over toes (Ben Patrick's Knee Ability Zero, low-load daily set)
+  X("backward-walk", "Backward walk (cable or treadmill)", "quads", "locomotion", "cable", 5, 1, 5, 8, 30, "Low cable, handles at your hips, walk backwards 15 steps, walk back, repeat. Treadmill or a slope at the gym. Log minutes.", { unit: 'min' }),
+  X("patrick-step", "Backward step-up (Patrick step)", "quads", "knees over toes", "bodyweight", 2, 2, 10, 20, 30, "Stand on a low step (start with a 20 kg plate flat). Lower the other heel to the floor in front, working knee travels over the toes. Hold a rail.", { perSide: true }),
+  X("couch-stretch", "Couch stretch", "quads", "mobility", "bodyweight", 2, 1, 60, 90, 15, "Back knee against a wall or bench, front foot flat. Squeeze the back glute. Seconds per side.", { perSide: true, unit: 'sec' }),
+  X("atg-split-squat", "ATG split squat", "quads", "knees over toes", "dumbbell", 2, 2, 5, 10, 90, "Long stride, front knee travels well past the toes, back knee down. Assist with a rail. Physio clearance first.", { perSide: true, kneeGoverned: true }),
   X("machine-calf-raise", "Standing calf raise (machine)", "calves", "calf raise", "machine", 5, 3, 12, 20, 60, "Full stretch at the bottom, pause at the top."),
 ]
 
 export const byId = new Map(LIBRARY.map(e => [e.id, e]))
 export const MUSCLES: Muscle[] = ['chest', 'back', 'shoulders', 'biceps', 'triceps', 'quads', 'hamstrings', 'glutes', 'calves', 'core']
 export const exName = (id: string) => byId.get(id)?.name ?? id
+
+export const unitOf = (e?: LibraryExercise): Unit => e?.unit ?? (e?.isometric ? 'sec' : 'reps')
+/** Suffix after a number: "12", "45s", "5 min". */
+export const unitSuffix = (e?: LibraryExercise) => ({ reps: '', sec: 's', min: ' min' })[unitOf(e)]
+/** Word under the stepper and in targets. */
+export const unitWord = (e?: LibraryExercise) => ({ reps: 'reps', sec: 'seconds', min: 'minutes' })[unitOf(e)]
+/** How far one tap of the reps stepper moves. */
+export const unitStep = (e?: LibraryExercise) => ({ reps: 1, sec: 5, min: 1 })[unitOf(e)]
