@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getPlan, getSetting, resetDay, resetWholePlan, restoreArchivedPlan, savePlanDay } from './db'
+import { archiveLabel, getPlan, resetDay, resetWholePlan, restoreArchivedPlan, savePlanDay } from './db'
 import { byId, LIBRARY, MUSCLES, unitOf, unitSuffix, type LibraryExercise } from './library'
 import { isKneeGated } from './progression'
 import { clamp, Field, range } from './components'
@@ -20,13 +20,13 @@ export function Plan() {
   const [key, setKey] = useState<string | null>(null)
   const [editing, setEditing] = useState<number | null>(null)
   const [picker, setPicker] = useState<'add' | 'swap' | null>(null)
-  const [hasArchive, setHasArchive] = useState(false)
+  const [archived, setArchived] = useState<string | null>(null)
 
   const load = async () => {
     const p = await getPlan()
     setPlan(p)
     setKey(k => (k && p.some(d => d.key === k) ? k : p[0]?.key ?? null))
-    setHasArchive(!!(await getSetting('planArchive')))
+    setArchived(await archiveLabel())
   }
   useEffect(() => { load() }, [])
 
@@ -98,6 +98,11 @@ export function Plan() {
         )}
         <Field label="Minimum jump (kg)" value={slot.incrementKg} step={0.5} onChange={v => patch({ incrementKg: clamp(v, 0.5, 20) })}
           hint="Progression adds at least this, rounded up to the next load your kit allows" />
+        {editing < day.exercises.length - 1 && (
+          <button className={`btn${slot.pairNext ? ' primary' : ''}`} style={{ minHeight: 48, marginBottom: 8 }} onClick={() => patch({ pairNext: !slot.pairNext })}>
+            {slot.pairNext ? `Superset with ${byId.get(day.exercises[editing + 1].exId)?.name ?? 'next'}: on` : 'Superset with the next exercise: off'}
+          </button>
+        )}
         {day.inRotation === false && (
           <button className={`btn${slot.light ? ' primary' : ''}`} style={{ minHeight: 48, marginBottom: 8 }} onClick={() => patch({ light: !slot.light })}>
             {slot.light ? 'In the light version: yes' : 'In the light version: no'}
@@ -119,7 +124,7 @@ export function Plan() {
 
   return (
     <div className="screen">
-      <div className="eyebrow">{day.inRotation === false ? 'Plan · daily, outside the rotation' : 'Plan · 4-day rotation'}</div>
+      <div className="eyebrow">{day.inRotation === false ? 'Plan · daily, outside the rotation' : `Plan · ${plan.filter(d => d.inRotation !== false).length}-day rotation`}</div>
       <h1 className="title" style={{ fontSize: 22 }}>{day.title}</h1>
       <div className="chiprow" style={{ marginBottom: 12 }}>
         {plan.map(d => <button key={d.key} className={`chip${d.key === key ? ' on' : ''}`} onClick={() => { setKey(d.key); setEditing(null) }}>{d.short}</button>)}
@@ -139,7 +144,7 @@ export function Plan() {
               <div className="exrow">
                 <div>
                   <div style={{ fontWeight: 600 }}>{lib?.name ?? e.exId}</div>
-                  <div className="muted small num">{e.sets} × {range(e.repLo, e.repHi)}{unitSuffix(lib)} · rest {e.restSec}s{isKneeGated(e, lib) ? ' · knee' : ''}{day.inRotation === false && e.light ? ' · light' : ''}</div>
+                  <div className="muted small num">{e.sets} × {range(e.repLo, e.repHi)}{unitSuffix(lib)} · rest {e.restSec}s{isKneeGated(e, lib) ? ' · knee' : ''}{day.inRotation === false && e.light ? ' · light' : ''}{e.prep ? ' · warm-up' : ''}{e.pairNext ? ' · superset ↓' : ''}</div>
                 </div>
                 <div className="muted">›</div>
               </div>
@@ -159,18 +164,18 @@ export function Plan() {
         if (!confirm('Reset the whole plan to the 4-day default? History is kept.')) return
         await resetWholePlan(); await load()
       }}>Reset whole plan</button>
-      {hasArchive && (
+      {archived && (
         <>
           <div style={{ height: 8 }} />
           <button className="btn ghost" onClick={async () => {
-            if (!confirm('Switch back to the old 6-day plan you had before this update? History is kept.')) return
+            if (!confirm(`Switch to your previous ${archived} plan, with all its edits? The plan you're on now is kept, so you can switch back. History is kept.`)) return
             await restoreArchivedPlan(); await load()
-          }}>Restore the old 6-day plan</button>
+          }}>Switch to previous plan ({archived})</button>
         </>
       )}
       <p className="muted small">{day.inRotation === false
         ? 'KOT never counts towards the rotation. The light version runs the day of or after a leg session, or when the knee is flagged.'
-        : "Days run in order, whatever the weekday. The Today screen always offers the day you've gone longest without."}</p>
+        : "Days run in order, whatever the weekday. The Today screen always offers the day you've gone longest without. Every day is full body, so any two in a week train everything."}</p>
     </div>
   )
 }

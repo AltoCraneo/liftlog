@@ -16,6 +16,10 @@ export interface PlanExercise {
   note?: string
   /** Kept in the light version of an out-of-rotation day (KOT). */
   light?: boolean
+  /** Superset: alternate sets with the next exercise in the day. */
+  pairNext?: boolean
+  /** Built-in warm-up slot (counts as the day's KOT light). */
+  prep?: boolean
 }
 
 export interface PlanDay {

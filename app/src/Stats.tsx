@@ -6,7 +6,7 @@ import { e1rm, isoWeekKey } from './progression'
 import { Bars, LineChart, Stepper } from './components'
 import type { BodyLog, CompletedSession, KneeCheck, SetLog } from './types'
 
-const WEEKLY_TARGET = 4
+const WEEKLY_TARGET = 3
 
 export function Stats() {
   const [body, setBody] = useState<BodyLog[]>([])
@@ -62,19 +62,20 @@ export function Stats() {
 
   const kotWeeks = useMemo(() => {
     const days = new Map<string, Set<string>>()
-    for (const s of sessions) {
-      if (s.dayKey !== KOT_KEY) continue
-      const k = isoWeekKey(new Date(s.date + 'T12:00:00'))
+    const add = (date: string) => {
+      const k = isoWeekKey(new Date(date + 'T12:00:00'))
       if (!days.has(k)) days.set(k, new Set())
-      days.get(k)!.add(s.date)
+      days.get(k)!.add(date)
     }
+    for (const s of sessions) if (s.dayKey === KOT_KEY) add(s.date)
+    for (const l of sets) if (l.exerciseId === 'backward-walk') add(l.date) // warm-up KOT counts
     const out: { label: string; y: number }[] = []
     for (let i = 7; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i * 7)
       out.push({ label: i === 0 ? 'now' : `-${i}w`, y: days.get(isoWeekKey(d))?.size ?? 0 })
     }
     return out
-  }, [sessions])
+  }, [sessions, sets])
 
   // Knee pain on each leg day, next to the heaviest box squat that day.
   const knee = useMemo(() => {
@@ -154,13 +155,13 @@ export function Stats() {
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 8 }}>Sessions per week</div>
         <Bars data={weeks} highlight={WEEKLY_TARGET} />
-        <p className="muted small" style={{ margin: 0 }}>Gold weeks hit {WEEKLY_TARGET}, one full rotation. Three is still a solid week. KOT isn't counted here.</p>
+        <p className="muted small" style={{ margin: 0 }}>Gold weeks hit {WEEKLY_TARGET}, the target. A fourth is a bonus. KOT isn't counted here.</p>
       </div>
 
       <div className="card">
         <div className="eyebrow" style={{ marginBottom: 8 }}>KOT days per week</div>
         <Bars data={kotWeeks} highlight={5} max={7} />
-        <p className="muted small" style={{ margin: 0 }}>Gold weeks hit 5 or more days. Light days count.</p>
+        <p className="muted small" style={{ margin: 0 }}>Gold weeks hit 5 or more days. Light days and training-day warm-ups count.</p>
       </div>
     </div>
   )

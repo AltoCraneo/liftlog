@@ -1,7 +1,7 @@
 // Pure training logic: knee gate, load suggestions, PRs, rotation. No database access here,
 // so every rule can be tested against real history.
 import { unitOf, unitSuffix, type LibraryExercise } from './library'
-import type { CompletedSession, KneeCheck, PlanDay, PlanExercise, SetLog } from './types'
+import type { CompletedSession, KneeCheck, LoggedSet, PlanDay, PlanExercise, SetLog } from './types'
 import { ladderMax, snap, stepDown, stepUp } from './equipment'
 
 // ---------- Knee gate ----------
@@ -240,3 +240,20 @@ export function kotLight(args: { today: string; sessions: CompletedSession[]; pl
   if (recentLeg) return { light: true, why: 'Leg session in the last day, so today is the light version.' }
   return { light: false, why: null }
 }
+
+// ---------- Supersets ----------
+/**
+ * Where to go after a working set. Supersets (slot.pairNext) alternate with their partner until
+ * both are done; otherwise stay on the exercise until its sets are done, then move on.
+ */
+export function nextTarget(exs: PlanExercise[], i: number, logged: LoggedSet[]): { index: number; setIndex: number; restSec: number } {
+  const done = (k: number) => logged.filter(l => l.exerciseId === exs[k].exId && !l.isWarmup).length
+  const slot = exs[i]
+  const partner = slot.pairNext && i + 1 < exs.length ? i + 1 : i > 0 && exs[i - 1].pairNext ? i - 1 : null
+  if (partner !== null && done(partner) < exs[partner].sets) return { index: partner, setIndex: done(partner), restSec: slot.restSec }
+  const longest = partner !== null ? Math.max(slot.restSec, exs[partner].restSec) : slot.restSec
+  if (done(i) < slot.sets) return { index: i, setIndex: done(i), restSec: longest }
+  const after = Math.max(i, partner ?? i) + 1
+  return { index: after, setIndex: after < exs.length ? done(after) : 0, restSec: longest }
+}
+

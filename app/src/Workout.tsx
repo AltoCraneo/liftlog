@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { autoCloseIfStale, db, finishSession, getEquipment, suggestionFor } from './db'
 import { DEFAULT_EQUIPMENT, loadLadder, platesPerSide, platesText, snap, stepDown, stepUp, type EquipmentProfile } from './equipment'
 import { byId, unitStep, unitSuffix, unitWord } from './library'
-import { isKneeGated, isPR, type Suggestion } from './progression'
+import { isKneeGated, isPR, nextTarget, type Suggestion } from './progression'
 import { range, Stepper } from './components'
 import type { ActiveSession, LoggedSet } from './types'
 
@@ -122,14 +122,9 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
       let next: ActiveSession
       if (warm) next = { ...session, logged: [...session.logged, entry], restEndsTs: Date.now() + 60_000 }
       else {
-        const n = count + 1
-        const finished = n >= slot.sets
-        next = {
-          ...session, logged: [...session.logged, entry],
-          setIndex: finished ? 0 : n,
-          exerciseIndex: finished ? session.exerciseIndex + 1 : session.exerciseIndex,
-          restEndsTs: Date.now() + slot.restSec * 1000,
-        }
+        const logged = [...session.logged, entry]
+        const t = nextTarget(session.exercises, session.exerciseIndex, logged)
+        next = { ...session, logged, setIndex: t.setIndex, exerciseIndex: t.index, restEndsTs: t.restSec > 0 ? Date.now() + t.restSec * 1000 : null }
       }
       guard.current = true
       await save(next)
@@ -199,7 +194,7 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
                 <div className="exrow">
                   <div>
                     <div style={{ fontWeight: 600 }}>{l?.name ?? ex.exId}</div>
-                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{unitSuffix(l)} · rest {ex.restSec}s</div>
+                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{unitSuffix(l)}{ex.prep ? ' · warm-up' : ''}{ex.pairNext ? ' · superset with next' : ` · rest ${ex.restSec}s`}</div>
                   </div>
                   <div className="small" style={{ color: n >= ex.sets ? 'var(--good)' : i === session.exerciseIndex ? 'var(--accent)' : 'var(--muted)' }}>{tag}</div>
                 </div>
@@ -255,7 +250,9 @@ export function Workout({ session, onUpdate, onBack, onExit }: {
   prevLeft.current = left
 
   if (session.restEndsTs && left > 0) {
-    const frac = Math.min(1, left / slot.restSec)
+    const lastTs = session.logged.length ? session.logged[session.logged.length - 1].ts : now
+    const total = Math.max(1, Math.round((session.restEndsTs - lastTs) / 1000))
+    const frac = Math.min(1, left / total)
     const R = 90, C = 2 * Math.PI * R
     return (
       <div className="screen fullbleed">

@@ -67,10 +67,9 @@ test('knee gated lift does not increase at the limit', () => {
 test('rotation picks the day done least recently', () => {
   const plan = defaultPlan()
   const s = (dayKey: string, date: string, t: number) => ({ date, dayKey, title: '', startedTs: t, finishedTs: t + 1, kneePain: null })
-  assert.equal(nextUp(plan, [])!.key, 'upper-a')
-  assert.equal(nextUp(plan, [s('upper-a', '2026-10-01', 1), s('lower-a', '2026-10-02', 2), s('upper-b', '2026-10-03', 3)])!.key, 'lower-b')
-  // skipped ahead to Upper A: Lower B is still owed
-  assert.equal(nextUp(plan, [s('upper-a', '2026-10-01', 1), s('lower-a', '2026-10-02', 2), s('upper-b', '2026-10-03', 3), s('upper-a', '2026-10-04', 4)])!.key, 'lower-b')
+  assert.equal(nextUp(plan, [])!.key, 'fb-1')
+  assert.equal(nextUp(plan, [s('fb-1', '2026-10-01', 1), s('fb-2', '2026-10-02', 2), s('fb-3', '2026-10-03', 3)])!.key, 'fb-4')
+  assert.equal(nextUp(plan, [s('fb-1', '2026-10-01', 1), s('fb-2', '2026-10-02', 2), s('fb-3', '2026-10-03', 3), s('fb-1', '2026-10-04', 4)])!.key, 'fb-4')
 })
 
 test('every default plan exercise exists in the library', () => {

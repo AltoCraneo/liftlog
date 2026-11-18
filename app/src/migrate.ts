@@ -1,7 +1,7 @@
-// Upgrade from the v4 app (6-day plan, schema 3) to v5 (4-day rotation, schema 4).
+// Upgrades older plans and data to v5.1 (four full body days plus KOT, schema 5).
 // Used twice: by the on-phone database upgrade, and when importing an older backup.
 // Pure function: plain arrays in, plain arrays out.
-import { defaultPlan, KOT_KEY, kotDay, PLAN_VERSION } from './programme'
+import { defaultPlan, FB_PREFIX, KOT_KEY, kotDay, PLAN_VERSION } from './programme'
 import type { CompletedSession, PlanDay, SetLog, Setting } from './types'
 
 export const SCHEMA = 5
@@ -24,7 +24,28 @@ export interface UpgradeResult {
   settings: Setting[] // settings to put (added or changed)
 }
 
-export const isV5Plan = (plan: PlanDay[]) => plan.some(d => d.key === 'upper-a') && plan.filter(d => d.inRotation !== false).every(d => d.dayIndex <= 4)
+export const isFullBodyPlan = (plan: PlanDay[]) => plan.some(d => d.key.startsWith(FB_PREFIX))
+
+const planLabel = (plan: PlanDay[]) => {
+  const n = plan.filter(d => d.inRotation !== false).length
+  return plan.some(d => d.key.startsWith(FB_PREFIX)) ? `${n}-day full body` : `${n}-day split`
+}
+
+/**
+ * Move an older plan to the full body plan. The plan being replaced is archived (with every edit)
+ * so it can be restored; an archive already there is kept under planArchiveOlder.
+ */
+export function switchPlan(plan: PlanDay[], settings: Setting[], now = new Date()): { plan: PlanDay[]; replaced: boolean; settings: Setting[] } {
+  if (isFullBodyPlan(plan)) {
+    const k = ensureKot(plan)
+    return { plan: k.plan, replaced: false, settings: [] }
+  }
+  const out: Setting[] = []
+  const prev = settings.find(s => s.key === 'planArchive')
+  if (prev) out.push({ key: 'planArchiveOlder', value: prev.value })
+  if (plan.length) out.push({ key: 'planArchive', value: JSON.stringify({ savedAt: now.toISOString(), label: planLabel(plan), plan }) })
+  return { plan: defaultPlan(), replaced: true, settings: out }
+}
 
 /** Add the KOT day if the plan has none. Every other day is left exactly as it is. */
 export function ensureKot(plan: PlanDay[]): { plan: PlanDay[]; added: boolean } {
@@ -60,18 +81,12 @@ export function fixLongSessions(sessions: CompletedSession[], setLogs: SetLog[])
 }
 
 export function upgradeData(input: UpgradeInput, now = new Date()): UpgradeResult {
-  const settings: Setting[] = []
-  let plan = input.plan
-  let planReplaced = false
-  if (!isV5Plan(plan)) {
-    if (plan.length) settings.push({ key: 'planArchive', value: JSON.stringify({ savedAt: now.toISOString(), plan }) })
-    plan = defaultPlan()
-    planReplaced = true
-  }
-  const kot = ensureKot(plan)
-  plan = kot.plan
-  settings.push({ key: 'planVersion', value: PLAN_VERSION })
+  const hadKot = input.plan.some(d => d.key === KOT_KEY)
+  const sw = switchPlan(input.plan, input.settings, now)
+  const plan = sw.plan
+  const planReplaced = sw.replaced
+  const settings: Setting[] = [...sw.settings, { key: 'planVersion', value: PLAN_VERSION }]
   const { sessions, fixed } = fixLongSessions(input.sessions, input.setLogs)
   if (fixed.length) settings.push({ key: 'autoClosedFix', value: JSON.stringify(fixed) })
-  return { plan, planReplaced, kotAdded: kot.added, sessions, fixed, settings }
+  return { plan, planReplaced, kotAdded: !hadKot, sessions, fixed, settings }
 }

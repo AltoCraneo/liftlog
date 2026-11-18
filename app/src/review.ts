@@ -20,7 +20,10 @@ export function buildReview(args: {
   const inWin = (d: string) => d > fromStr && d <= toStr
   const all = args.sessions.filter(s => inWin(s.date)).sort((a, b) => (a.date < b.date ? -1 : 1))
   const sess = all.filter(s => s.dayKey !== KOT_KEY)
-  const kotDays = new Set(all.filter(s => s.dayKey === KOT_KEY).map(s => s.date)).size
+  const kotDays = new Set([
+    ...all.filter(s => s.dayKey === KOT_KEY).map(s => s.date),
+    ...args.setLogs.filter(l => l.exerciseId === 'backward-walk' && inWin(l.date)).map(l => l.date),
+  ]).size
   const lines: string[] = []
 
   lines.push(`LiftLog review: ${fromStr} to ${toStr} (${days} days)`)

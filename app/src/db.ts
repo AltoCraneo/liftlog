@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import { DEFAULT_EQUIPMENT, type EquipmentProfile, loadLadder, type Location } from './equipment'
 import { byId } from './library'
-import { ensureKot, SCHEMA, upgradeData } from './migrate'
+import { ensureKot, SCHEMA, switchPlan, upgradeData } from './migrate'
 import { defaultPlan } from './programme'
 import { kneeGate, suggest, todayStr, type Suggestion } from './progression'
 import type { ActiveSession, Backup, BodyLog, CompletedSession, KneeCheck, PlanDay, PlanExercise, SetLog, Setting } from './types'
@@ -44,11 +44,13 @@ class LiftLogDB extends Dexie {
       for (const s of r.sessions) if (s.autoClosed && s.id !== undefined) await tx.table('sessions').put(s)
       await tx.table('settings').bulkPut(r.settings)
     })
-    // v5.1: add the KOT day outside the rotation. Leaves every existing day and edit untouched.
+    // v5.1: four full body days plus KOT. The plan being replaced is archived with all its edits.
     this.version(5).stores(STORES).upgrade(async tx => {
-      const plan = await tx.table('plan').toArray()
-      const r = ensureKot(plan)
-      if (r.added) await tx.table('plan').put(r.plan[r.plan.length - 1])
+      const [plan, sets] = await Promise.all([tx.table('plan').toArray(), tx.table('settings').toArray()])
+      const r = switchPlan(plan, sets)
+      await tx.table('plan').clear()
+      await tx.table('plan').bulkPut(r.plan)
+      await tx.table('settings').bulkPut([...r.settings, { key: 'planSwitchNotice', value: r.replaced ? '1' : '' }].filter(x => x.value !== ''))
     })
   }
 }
@@ -105,8 +107,23 @@ export async function restoreArchivedPlan(): Promise<boolean> {
   if (!raw) return false
   const { plan } = JSON.parse(raw) as { plan: PlanDay[] }
   const withKot = ensureKot(plan).plan
-  await db.transaction('rw', db.plan, async () => { await db.plan.clear(); await db.plan.bulkPut(withKot) })
+  // Swap: the plan in use becomes the archive, so switching back is always one tap.
+  const current = await getPlan()
+  const label = current.some(d => d.key.startsWith('fb-')) ? `${current.filter(d => d.inRotation !== false).length}-day full body` : `${current.filter(d => d.inRotation !== false).length}-day split`
+  await db.transaction('rw', [db.plan, db.settings], async () => {
+    await db.plan.clear(); await db.plan.bulkPut(withKot)
+    await db.settings.put({ key: 'planArchive', value: JSON.stringify({ savedAt: new Date().toISOString(), label, plan: current }) })
+  })
   return true
+}
+
+export async function archiveLabel(): Promise<string | null> {
+  const raw = await getSetting('planArchive')
+  if (!raw) return null
+  try {
+    const a = JSON.parse(raw) as { label?: string; plan: PlanDay[] }
+    return a.label ?? `${a.plan.filter(d => d.inRotation !== false).length}-day plan`
+  } catch { return null }
 }
 
 // ---------- suggestions ----------

@@ -199,6 +199,7 @@ export const LIBRARY: LibraryExercise[] = [
   X("patrick-step", "Backward step-up (Patrick step)", "quads", "knees over toes", "bodyweight", 2, 2, 10, 20, 30, "Stand on a low step (start with a 20 kg plate flat). Lower the other heel to the floor in front, working knee travels over the toes. Hold a rail.", { perSide: true }),
   X("couch-stretch", "Couch stretch", "quads", "mobility", "bodyweight", 2, 1, 60, 90, 15, "Back knee against a wall or bench, front foot flat. Squeeze the back glute. Seconds per side.", { perSide: true, unit: 'sec' }),
   X("atg-split-squat", "ATG split squat", "quads", "knees over toes", "dumbbell", 2, 2, 5, 10, 90, "Long stride, front knee travels well past the toes, back knee down. Assist with a rail. Physio clearance first.", { perSide: true, kneeGoverned: true }),
+  X("sa-pulldown", "Single-arm cable pulldown (kneeling)", "back", "vertical pull", "cable", 5, 3, 10, 15, 90, "Kneel facing the high pulley, pull elbow down to your ribs, slow return. Lets the 70 kg stack keep challenging you.", { perSide: true }),
   X("machine-calf-raise", "Standing calf raise (machine)", "calves", "calf raise", "machine", 5, 3, 12, 20, 60, "Full stretch at the bottom, pause at the top."),
 ]
 

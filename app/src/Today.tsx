@@ -20,6 +20,8 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
   const [autoNote, setAutoNote] = useState<string | null>(null)
   const [sugs, setSugs] = useState<Record<string, Suggestion>>({})
   const [weigh, setWeigh] = useState<{ due: boolean; kg: number }>({ due: false, kg: 88 })
+  const [kotByWarmup, setKotByWarmup] = useState(false)
+  const [switchNote, setSwitchNote] = useState(false)
   const [kot, setKot] = useState<{ doneToday: boolean; week: number; light: boolean; why: string | null }>({ doneToday: false, week: 0, light: false, why: null })
   const today = todayStr()
 
@@ -36,9 +38,12 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
     setTrainedToday(sessions.some(s => s.date === today && rotationKeys.has(s.dayKey)))
     const g = kneeGate(checks)
     const kotSessions = sessions.filter(s => s.dayKey === KOT_KEY)
+    // The backward walk warm-up in a full body session counts as that day's KOT light.
+    const warmKot = (await db.setLogs.where('date').equals(today).toArray()).some(l => l.exerciseId === 'backward-walk' && l.dayKey !== KOT_KEY)
+    setKotByWarmup(warmKot && !kotSessions.some(s => s.date === today))
     const wk0 = isoWeekKey(new Date())
     setKot({
-      doneToday: kotSessions.some(s => s.date === today),
+      doneToday: kotSessions.some(s => s.date === today) || warmKot,
       week: new Set(kotSessions.filter(s => isoWeekKey(new Date(s.date + 'T12:00:00')) === wk0).map(s => s.date)).size,
       ...kotLight({ today, sessions, plan: p, gate: g }),
     })
@@ -55,6 +60,7 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
       setBackupMsg((await db.setLogs.count()) > 0 ? 'No backup yet. Your history only exists on this phone.' : null)
     }
     setAutoNote(await getSetting('autoClosedNotice'))
+    setSwitchNote((await getSetting('planSwitchNotice')) === '1')
 
     const wk = isoWeekKey(new Date())
     const body = await db.bodyLog.orderBy('date').toArray()
@@ -161,6 +167,12 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
           {physio && <div style={{ marginTop: 6 }}>Knee pain has been 3 or more on your last two leg days. Worth checking with your physio before adding load.</div>}
         </div>
       )}
+      {switchNote && (
+        <div className="banner warn">
+          <strong>New plan:</strong> four 30-minute full body sessions, done in order. Every session trains legs, push and pull, so any two in a week cover everything. Aim for three, a fourth is a bonus. Your 4-day plan, with all your edits, is saved under Plan.
+          <div className="row"><button className="btn" onClick={async () => { await db.settings.delete('planSwitchNotice'); setSwitchNote(false) }}>Got it</button></div>
+        </div>
+      )}
       {autoNote && (
         <div className="banner warn">
           {autoNote}
@@ -169,23 +181,6 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
       )}
       {backupMsg && (
         <div className="banner warn"><strong>Backup reminder:</strong> {backupMsg} Export from Settings. Clearing Safari data would wipe everything.</div>
-      )}
-
-      {kotPlan && (
-        <div className="card kotcard">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-            <div className="eyebrow">KOT daily{kot.light ? ' · light today' : ''}</div>
-            <span className={`chip${kot.doneToday ? ' good' : ''}`}>{kot.doneToday ? 'done today ✓' : `${kot.week} this week`}</span>
-          </div>
-          <div className="small muted" style={{ margin: '6px 0 10px' }}>
-            {(kot.light ? kotPlan.exercises.filter(e => e.light) : kotPlan.exercises).map(e => byId.get(e.exId)?.name.replace(/ \(.*\)/, '') ?? e.exId).join(' · ')}
-          </div>
-          {kot.why && !kot.doneToday && <div className="small" style={{ marginBottom: 10 }}>{kot.why}</div>}
-          <button className={`btn${kot.doneToday ? ' ghost' : ''}`} onClick={() => begin(kotPlan, { kot: true, light: kot.light })}>
-            {kot.doneToday ? `Do KOT again${kot.light ? ' (light)' : ''}` : `Start KOT${kot.light ? ' (light)' : ''}`}
-          </button>
-          {kot.light && <button className="btn ghost" style={{ marginTop: 8, minHeight: 40, fontSize: 14 }} onClick={() => begin(kotPlan, { kot: true })}>Do the full routine anyway</button>}
-        </div>
       )}
 
       {weigh.due && (
@@ -211,7 +206,7 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
               <div className="eyebrow">Warm-up</div>
               <span className={`chip${day.location === 'gym' ? ' warn' : ''}`}>{day.location === 'gym' ? 'Gym' : 'Home'}</span>
             </div>
-            {(day.isLegDay ? WARMUP.leg : WARMUP.upper).map((w, i) => <div key={i} className="small" style={{ padding: '3px 0' }}>• {w}</div>)}
+            {(day.exercises[0]?.prep ? WARMUP.built : day.isLegDay ? WARMUP.leg : WARMUP.upper).map((w, i) => <div key={i} className="small" style={{ padding: '3px 0' }}>• {w}</div>)}
           </div>
           <div className="card flush">
             {day.exercises.map(ex => {
@@ -222,7 +217,7 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
                 <div key={ex.slotId} className="exrow">
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{lib?.name ?? ex.exId}</div>
-                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{unitSuffix(lib)}{gated ? ' · knee gated' : ''}</div>
+                    <div className="muted small num">{ex.sets} × {range(ex.repLo, ex.repHi)}{unitSuffix(lib)}{gated ? ' · knee gated' : ''}{ex.prep ? ' · warm-up' : ''}{ex.pairNext ? ' · superset ↓' : ''}</div>
                   </div>
                   <div className="num small" style={{ textAlign: 'right', whiteSpace: 'nowrap', color: s?.tone === 'alert' ? 'var(--bad)' : s?.tone === 'hold' ? 'var(--accent)' : 'var(--ink)' }}>
                     {s ? `${s.weightKg !== null ? `${s.weightKg} kg × ` : ''}${s.reps}${unitSuffix(lib)}` : ''}
@@ -237,6 +232,25 @@ export function Today({ onStart, onEditPlan }: { onStart: (s: ActiveSession) => 
           {trainedToday && <p className="muted small" style={{ textAlign: 'center' }}>Already logged a session today. Nice.</p>}
         </>
       )}
+
+      {kotPlan && (
+        <div className="card kotcard" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+            <div className="eyebrow">KOT daily{kot.light ? ' · light today' : ''}</div>
+            <span className={`chip${kot.doneToday ? ' good' : ''}`}>{kot.doneToday ? (kotByWarmup ? 'done in warm-up ✓' : 'done today ✓') : `${kot.week} this week`}</span>
+          </div>
+          <div className="small muted" style={{ margin: '6px 0 10px' }}>
+            {(kot.light ? kotPlan.exercises.filter(e => e.light) : kotPlan.exercises).map(e => byId.get(e.exId)?.name.replace(/ \(.*\)/, '') ?? e.exId).join(' · ')}
+          </div>
+          {kot.why && !kot.doneToday && <div className="small" style={{ marginBottom: 10 }}>{kot.why}</div>}
+          {!kot.doneToday && !trainedToday && <div className="small muted" style={{ marginBottom: 10 }}>Training today? The warm-up in every FB session counts as KOT light.</div>}
+          <button className={`btn${kot.doneToday ? ' ghost' : ''}`} onClick={() => begin(kotPlan, { kot: true, light: kot.light })}>
+            {kot.doneToday ? `Do KOT again${kot.light ? ' (light)' : ''}` : `Start KOT${kot.light ? ' (light)' : ''}`}
+          </button>
+          {kot.light && <button className="btn ghost" style={{ marginTop: 8, minHeight: 40, fontSize: 14 }} onClick={() => begin(kotPlan, { kot: true })}>Do the full routine anyway</button>}
+        </div>
+      )}
+
     </div>
   )
 }
